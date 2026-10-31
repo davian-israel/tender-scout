@@ -1,0 +1,25 @@
+{
+  "name": "tender-scout",
+  "version": "0.1.0",
+  "description": "Public contract alerts for UK micro-businesses",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  },
+  "private": true,
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@fontsource/barlow": "^5.3.0",
+    "@fontsource/barlow-condensed": "^5.3.0",
+    "express": "^5.3.0",
+    "node-cron": "^4.6.0",
+    "pg": "^8.23.1",
+    "stripe": "^23.1.0"
+  }
+}
