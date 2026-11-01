@@ -11,3 +11,6 @@
 - Summaries must never change values, dates or eligibility rules.
 ## Hard limits
 No spending, no new accounts, no cold outreach to buyers or suppliers, no pricing/legal changes without Davian.
+
+## Deploys
+Pushes to `main` should deploy automatically. If no new Railway deployment appears within 5 minutes, reconnect the service source (Railway `connect-service-source`, same repo and branch) to trigger it, then confirm `/healthz`.
