@@ -12,7 +12,7 @@ export const CORE_MIGRATIONS = [
      id                   SERIAL PRIMARY KEY,
      email                TEXT NOT NULL,
      ref                  TEXT,                              -- what they subscribed to (search, template, profile...)
-     status               TEXT NOT NULL DEFAULT 'pending',   -- pending | trialing | active | cancelled
+     status               TEXT NOT NULL DEFAULT 'pending',   -- pending | trialing | active | past_due | cancelled
      stripe_customer      TEXT,
      stripe_subscription  TEXT UNIQUE,
      checkout_session     TEXT UNIQUE,
@@ -51,6 +51,8 @@ export async function metrics(pool, { venture, priceGbp, funnel = [] }) {
     venture,
     paid_active: paid,
     trialing: await n(`SELECT count(*) n FROM subscribers WHERE status = 'trialing'`),
+    past_due: await n(`SELECT count(*) n FROM subscribers WHERE status = 'past_due'`),
+    waitlist: await n(`SELECT count(*) n FROM subscribers WHERE status = 'pending'`),
     mrr_gbp: Number((paid * priceGbp).toFixed(2)),
     new_paid_7d: await n(`SELECT count(*) n FROM events WHERE type = 'paid' AND ${since}`),
     cancelled_7d: await n(`SELECT count(*) n FROM events WHERE type = 'cancelled' AND ${since}`),

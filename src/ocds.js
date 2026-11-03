@@ -22,7 +22,16 @@ export const SOURCES = {
   'find-a-tender': (from) => `https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?updatedFrom=${iso(from)}&stages=tender&limit=100`,
 };
 
+const CLOSED = new Set(['cancelled', 'withdrawn', 'unsuccessful', 'complete']);
+/** Only open tender-stage releases (Find a Tender ignores the stages filter server-side). */
+export function isOpenTender(r) {
+  const tags = (r.tag || []).map(String);
+  const tenderTag = tags.some((t) => t === 'tender' || t === 'tenderUpdate' || t === 'tenderAmendment');
+  return tenderTag && !CLOSED.has(r.tender?.status);
+}
+
 export function parseRelease(r, source) {
+  if (!isOpenTender(r)) return null;
   const t = r.tender || {};
   const buyerParty = (r.parties || []).find((p) => (p.roles || []).includes('buyer'));
   const region = t.deliveryAddresses?.[0]?.region || buyerParty?.address?.region || buyerParty?.address?.locality || null;
@@ -38,15 +47,20 @@ export function parseRelease(r, source) {
   };
 }
 
-export async function ingest(pool, { from = new Date(Date.now() - 2 * 864e5), fetchImpl = fetch, maxPages = 20 } = {}) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export async function ingest(pool, { from = new Date(Date.now() - 2 * 864e5), fetchImpl = fetch, maxPages = 60, delayMs = 1500 } = {}) {
   const stats = {};
   for (const [source, build] of Object.entries(SOURCES)) {
-    let url = build(from), pages = 0, n = 0;
+    let url = build(from), pages = 0, n = 0, seen = 0, retries = 0;
     try {
       while (url && pages < maxPages) {
+        if (pages) await sleep(delayMs); // both services rate-limit; Contracts Finder answers 403 when exceeded
         const res = await fetchImpl(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(30000) });
-        if (!res.ok) throw new Error(`${source} ${res.status}`);
+        if ((res.status === 403 || res.status === 429) && retries < 3) { retries++; await sleep(30000); continue; }
+        if (!res.ok) throw new Error(`${source} ${res.status} after ${pages} pages`);
         const body = await res.json();
+        seen += (body.releases || []).length;
         for (const rel of body.releases || []) {
           const nt = parseRelease(rel, source);
           if (!nt) continue;
@@ -61,7 +75,7 @@ export async function ingest(pool, { from = new Date(Date.now() - 2 * 864e5), fe
         url = body.links?.next || null;
         pages++;
       }
-      stats[source] = n;
+      stats[source] = { pages, releases: seen, kept: n, more: Boolean(url) };
     } catch (err) {
       stats[source] = `error: ${err.message}`;
       console.error('[ingest]', source, err.message);

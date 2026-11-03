@@ -30,6 +30,7 @@ export function score(profileText, notice) {
 }
 
 export function passesFilters(profile, notice, now = new Date()) {
+  if (!notice.deadline) return false; // no closing date = usually an award or notice we cannot act on
   if (notice.deadline && new Date(notice.deadline) < now) return false;
   if (profile.min_value && notice.value_gbp != null && Number(notice.value_gbp) < Number(profile.min_value)) return false;
   if (profile.region && profile.region !== 'Anywhere in the UK' && notice.region

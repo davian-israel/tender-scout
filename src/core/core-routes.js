@@ -1,7 +1,7 @@
 // Routes every venture shares: Stripe webhook, health, metrics, thanks, manage/cancel, fonts.
 import express from 'express';
 import { fileURLToPath } from 'node:url';
-import { handleStripeEvent } from './billing.js';
+import { handleStripeEvent, billingPortalUrl } from './billing.js';
 import { metrics, track } from './db.js';
 import { verifyToken } from './tokens.js';
 
@@ -54,12 +54,24 @@ export function mountCore(app, { pool, stripe, venture, priceGbp, funnel, fonts 
     const { rows } = id ? await pool.query('SELECT * FROM subscribers WHERE id = $1', [id]) : { rows: [] };
     const sub = rows[0];
     if (!sub) return sendHtml(res, views.messagePage('This link does not work', '<p>Open the newest email from us and use the manage link there.</p>'), 404);
-    const live = ['active', 'trialing'].includes(sub.status);
+    const live = ['active', 'trialing', 'past_due'].includes(sub.status);
+    const t = esc(req.params.token);
+    const portal = stripe && sub.stripe_customer
+      ? `<form method="post" action="/manage/${t}/billing" style="margin-bottom:12px"><button class="btn">Update card or see invoices</button></form>` : '';
+    const warn = sub.status === 'past_due' ? '<p><b>Your last payment did not go through.</b> Update your card to keep your subscription.</p>' : '';
     const body = live
-      ? `<p>Your subscription for <b>${esc(describe(sub))}</b> sends to ${esc(sub.email)}.</p>
-         <form method="post" action="/manage/${esc(req.params.token)}/cancel"><button class="btn">Cancel subscription</button></form>`
+      ? `${warn}<p>Your subscription for <b>${esc(describe(sub))}</b> sends to ${esc(sub.email)}.</p>${portal}
+         <form method="post" action="/manage/${t}/cancel"><button class="btn">Cancel subscription</button></form>`
       : `<p>Your subscription for <b>${esc(describe(sub))}</b> is ${esc(sub.status)}.</p>`;
     sendHtml(res, views.messagePage('Manage your subscription', body, { action: '' }));
+  }));
+
+  app.post('/manage/:token/billing', wrap(async (req, res) => {
+    const id = verifyToken(req.params.token);
+    const { rows } = id ? await pool.query('SELECT stripe_customer FROM subscribers WHERE id = $1', [id]) : { rows: [] };
+    if (!stripe || !rows[0]?.stripe_customer) return res.redirect(303, `/manage/${encodeURIComponent(req.params.token)}`);
+    const base = `${req.protocol}://${req.get('host')}`;
+    res.redirect(303, await billingPortalUrl(stripe, rows[0].stripe_customer, `${base}/manage/${encodeURIComponent(req.params.token)}`));
   }));
 
   app.post('/manage/:token/cancel', wrap(async (req, res) => {

@@ -54,15 +54,32 @@ export async function handleStripeEvent(pool, event) {
     return id;
   }
   if (event.type === 'invoice.paid' && o.subscription && o.amount_paid > 0) {
+    const { rows } = await pool.query(
+      `UPDATE subscribers s SET status = 'active' FROM (SELECT id, status AS was FROM subscribers WHERE stripe_subscription = $1) old
+       WHERE s.id = old.id AND s.status IN ('trialing','past_due') RETURNING old.was`, [o.subscription]);
+    // First paid invoice after a trial counts as a new paying subscriber; recovering a failed payment does not.
+    if (rows[0]?.was === 'trialing') await track(pool, 'paid', o.subscription);
+    if (rows[0]?.was === 'past_due') await track(pool, 'payment_recovered', o.subscription);
+  }
+  if (event.type === 'invoice.payment_failed' && o.subscription) {
     const { rowCount } = await pool.query(
-      `UPDATE subscribers SET status = 'active' WHERE stripe_subscription = $1 AND status = 'trialing'`, [o.subscription]);
-    if (rowCount) await track(pool, 'paid', o.subscription);
+      `UPDATE subscribers SET status = 'past_due' WHERE stripe_subscription = $1 AND status IN ('active','trialing')`, [o.subscription]);
+    if (rowCount) await track(pool, 'payment_failed', o.subscription);
   }
   if (event.type === 'customer.subscription.deleted') {
     const { rowCount } = await pool.query(
       `UPDATE subscribers SET status = 'cancelled', cancelled_at = now()
-       WHERE stripe_subscription = $1 AND status IN ('active','trialing')`, [o.id]);
+       WHERE stripe_subscription = $1 AND status IN ('active','trialing','past_due')`, [o.id]);
     if (rowCount) await track(pool, 'cancelled', o.id);
   }
   return null;
+}
+
+/** The webhook events every venture needs. Used by scripts/stripe-setup.js and the docs. */
+export const WEBHOOK_EVENTS = ['checkout.session.completed', 'invoice.paid', 'invoice.payment_failed', 'customer.subscription.deleted'];
+
+/** Stripe-hosted page where a subscriber updates their card, sees invoices or cancels. */
+export async function billingPortalUrl(stripe, customer, returnUrl) {
+  const s = await stripe.billingPortal.sessions.create({ customer, return_url: returnUrl });
+  return s.url;
 }
